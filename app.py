@@ -101,16 +101,7 @@ if predict:
     prediction = model.predict(input_data)[0]
 
     st.markdown("### 📊 Prediction Result")
-    res_col1, res_col2, res_col3 = st.columns(3)
-
-    with res_col1:
-        st.metric("Predicted Energy (kWh)", f"{prediction:.2f}")
-    with res_col2:
-        st.metric("MAE (model error)", "± 4.01 kWh")
-    with res_col3:
-        st.metric("Model R² Score", "0.6269")
-
-    st.markdown("### 🔔 Status")
+    
     if prediction > 90:
         st.error(f"🔴 Very High energy demand: {prediction:.2f} kWh — Consider reducing HVAC or occupancy.")
     elif prediction > 80:
