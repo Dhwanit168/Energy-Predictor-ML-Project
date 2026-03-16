@@ -1,60 +1,121 @@
 import streamlit as st
-import joblib
+import pandas as pd
 import numpy as np
+import joblib
 
-st.set_page_config(page_title="🏢 Building Energy Predictor", page_icon="⚡", layout="centered")
-st.title("🏢 Building Energy Consumption Prediction")
+# Load model and feature columns
+model        = joblib.load('energy_model_rf.joblib')
+feature_cols = joblib.load('feature_columns.joblib')
 
-# -------------------------------
-# Load saved model, scaler, encoders, and feature columns
-# -------------------------------
-model = joblib.load("linear_model.pkl")
-scaler = joblib.load("scaler.pkl")
-label_encoders = joblib.load("label_encoders.pkl")
-feature_columns = joblib.load("feature_columns.pkl")  # saved from training
+st.set_page_config(page_title="Energy Predictor", page_icon="⚡", layout="wide")
 
-# -------------------------------
-# User Inputs
-# -------------------------------
-temperature = st.number_input("Temperature (°C)", value=25.0)
-humidity = st.number_input("Humidity (%)", value=50.0)
-square_footage = st.number_input("Square Footage", value=1500.0)
-occupancy = st.number_input("Occupancy", value=5)
-hvac = st.selectbox("HVAC Usage", ["On", "Off"])
-lighting = st.selectbox("Lighting Usage", ["On", "Off"])
-renewable = st.number_input("Renewable Energy (kWh)", value=5.0)
-holiday = st.selectbox("Holiday", ["Yes", "No"])
-hour = st.number_input("Hour (0-23)", min_value=0, max_value=23, value=12)
-month = st.number_input("Month (1-12)", min_value=1, max_value=12, value=1)
-day_of_week = st.selectbox("Day of Week", ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"])
+st.markdown("<h1 style='text-align:center;'>⚡ Building Energy Consumption Predictor</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; margin-bottom:40px;'>Enter building details to predict hourly energy usage.</p>", unsafe_allow_html=True)
 
-# -------------------------------
-# Predict Button
-# -------------------------------
-if st.button("Predict Energy Consumption ⚡"):
+# ── Inputs (2 columns) ────────────────────────────────────────────────────────
+col1, col2 = st.columns(2)
 
-    # Encode binary inputs
-    hvac_val = label_encoders['HVACUsage'].transform([hvac])[0]
-    lighting_val = label_encoders['LightingUsage'].transform([lighting])[0]
-    holiday_val = label_encoders['Holiday'].transform([holiday])[0]
+with col1:
+    temp      = st.number_input("Temperature (°C)",       min_value=20.0, max_value=30.0, value=25.0, step=0.1)
+    humidity  = st.number_input("Humidity (%)",            min_value=30.0, max_value=60.0, value=45.0, step=0.1)
+    renewable = st.number_input("Renewable Energy (kWh)",  min_value=0.0,  max_value=30.0, value=10.0, step=0.1)
+    sq_ft     = st.number_input("Square Footage",          min_value=1000.0, max_value=2000.0, value=1500.0, step=10.0)
+    occupancy = st.number_input("Occupancy (People)",      min_value=0, max_value=9, value=5, step=1)
+    holiday   = st.selectbox("Holiday", ["No", "Yes"])
 
-    # Handle one-hot encoding for DayOfWeek
-    dayofweek_columns = [col for col in feature_columns if col.startswith("DayOfWeek_")]
-    dayofweek_array = np.zeros(len(dayofweek_columns))
-    day_map = { "Tuesday":0, "Wednesday":1, "Thursday":2, "Friday":3, "Saturday":4, "Sunday":5 }
-    if day_of_week != "Monday":  # Monday was dropped in training
-        idx = day_map[day_of_week]
-        dayofweek_array[idx] = 1
+with col2:
+    hvac    = st.selectbox("HVAC Status",     ["Off", "On"])
+    lights  = st.selectbox("Lighting Status", ["Off", "On"])
+    day     = st.selectbox("Day of Week", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])
+    hour    = st.slider("Hour of Day",   0, 23, 12)
+    month   = st.slider("Month",         1, 12,  6)
+    day_num = st.slider("Day of Month",  1, 31, 15)
 
-    # Combine all features
-    input_features = np.array([[temperature, humidity, square_footage, occupancy,
-                                hvac_val, lighting_val, renewable, holiday_val, hour, month]])
-    input_features = np.hstack([input_features, dayofweek_array.reshape(1, -1)])
+# ── Feature Engineering ───────────────────────────────────────────────────────
+hvac_on    = 1 if hvac    == "On"  else 0
+lights_on  = 1 if lights  == "On"  else 0
+holiday_on = 1 if holiday == "Yes" else 0
 
-    # Scale features
-    input_scaled = scaler.transform(input_features)
+hour_sin  = np.sin(2 * np.pi * hour    / 24)
+hour_cos  = np.cos(2 * np.pi * hour    / 24)
+month_sin = np.sin(2 * np.pi * month   / 12)
+month_cos = np.cos(2 * np.pi * month   / 12)
+day_sin   = np.sin(2 * np.pi * day_num / 31)
+day_cos   = np.cos(2 * np.pi * day_num / 31)
 
-    # Predict
-    predicted_energy = model.predict(input_scaled)[0]
+hvac_occupancy     = hvac_on * occupancy
+hvac_sqft          = hvac_on * sq_ft
+temp_occupancy     = temp * occupancy
+renewable_per_sqft = renewable / sq_ft
+temp_squared       = temp ** 2
+occupancy_squared  = occupancy ** 2
 
-    st.success(f"⚡ Predicted Energy Consumption: {predicted_energy:.2f} kWh")
+day_monday    = 1 if day == "Monday"    else 0
+day_saturday  = 1 if day == "Saturday"  else 0
+day_sunday    = 1 if day == "Sunday"    else 0
+day_thursday  = 1 if day == "Thursday"  else 0
+day_tuesday   = 1 if day == "Tuesday"   else 0
+day_wednesday = 1 if day == "Wednesday" else 0
+
+# ── Build Input DataFrame ─────────────────────────────────────────────────────
+input_data = pd.DataFrame([{
+    'Temperature'        : temp,
+    'Humidity'           : humidity,
+    'SquareFootage'      : sq_ft,
+    'Occupancy'          : occupancy,
+    'HVACUsage'          : hvac_on,
+    'LightingUsage'      : lights_on,
+    'RenewableEnergy'    : renewable,
+    'Holiday'            : holiday_on,
+    'hour_sin'           : hour_sin,
+    'hour_cos'           : hour_cos,
+    'month_sin'          : month_sin,
+    'month_cos'          : month_cos,
+    'day_sin'            : day_sin,
+    'day_cos'            : day_cos,
+    'HVAC_Occupancy'     : hvac_occupancy,
+    'HVAC_SqFt'          : hvac_sqft,
+    'Temp_Occupancy'     : temp_occupancy,
+    'Renewable_per_SqFt' : renewable_per_sqft,
+    'Temp_squared'       : temp_squared,
+    'Occupancy_squared'  : occupancy_squared,
+    'DayOfWeek_Monday'   : day_monday,
+    'DayOfWeek_Saturday' : day_saturday,
+    'DayOfWeek_Sunday'   : day_sunday,
+    'DayOfWeek_Thursday' : day_thursday,
+    'DayOfWeek_Tuesday'  : day_tuesday,
+    'DayOfWeek_Wednesday': day_wednesday,
+}])
+
+input_data = input_data[feature_cols]
+
+# ── Predict Button (small — centered) ────────────────────────────────────────
+st.markdown("---")
+
+_, btn_col, _ = st.columns([3, 1, 3])
+with btn_col:
+    predict = st.button("⚡ Predict", use_container_width=True)
+
+# ── Result ────────────────────────────────────────────────────────────────────
+if predict:
+    prediction = model.predict(input_data)[0]
+
+    st.markdown("### 📊 Prediction Result")
+    res_col1, res_col2, res_col3 = st.columns(3)
+
+    with res_col1:
+        st.metric("Predicted Energy (kWh)", f"{prediction:.2f}")
+    with res_col2:
+        st.metric("MAE (model error)", "± 4.01 kWh")
+    with res_col3:
+        st.metric("Model R² Score", "0.6269")
+
+    st.markdown("### 🔔 Status")
+    if prediction > 90:
+        st.error(f"🔴 Very High energy demand: {prediction:.2f} kWh — Consider reducing HVAC or occupancy.")
+    elif prediction > 80:
+        st.warning(f"🟡 High energy demand: {prediction:.2f} kWh — Monitor usage closely.")
+    elif prediction > 70:
+        st.success(f"🟢 Normal energy demand: {prediction:.2f} kWh — Within expected range.")
+    else:
+        st.info(f"🔵 Low energy demand: {prediction:.2f} kWh — Efficient usage.")
