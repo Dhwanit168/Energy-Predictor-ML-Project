@@ -16,11 +16,11 @@ st.markdown("<p style='text-align:center; margin-bottom:40px;'>Enter building de
 col1, col2 = st.columns(2)
 
 with col1:
-    temp      = st.number_input("Temperature (°C)",       min_value=20.0, max_value=30.0, value=25.0, step=0.1)
-    humidity  = st.number_input("Humidity (%)",            min_value=30.0, max_value=60.0, value=45.0, step=0.1)
-    renewable = st.number_input("Renewable Energy (kWh)",  min_value=0.0,  max_value=30.0, value=10.0, step=0.1)
-    sq_ft     = st.number_input("Square Footage",          min_value=1000.0, max_value=2000.0, value=1500.0, step=10.0)
-    occupancy = st.number_input("Occupancy (People)",      min_value=0, max_value=9, value=5, step=1)
+    temp      = st.number_input("Temperature (°C)", value=25.0, step=1.0)
+    humidity  = st.number_input("Humidity (%)", value=45.0, step=1.0)
+    renewable = st.number_input("Renewable Energy (kWh)", value=10.0, step=1.0)
+    sq_ft     = st.number_input("Square Footage", value=1500.0, step=1.0)
+    occupancy = st.number_input("Occupancy (People)", value=5, step=1)
     holiday   = st.selectbox("Holiday", ["No", "Yes"])
 
 with col2:
