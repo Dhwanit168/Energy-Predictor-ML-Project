@@ -90,47 +90,111 @@ input_data = pd.DataFrame([{
 }])
 input_data = input_data[feature_cols]
 
+# ── Helpers ────────────────────────────────────────────────
+def bar_color(val):
+    if val >= 90:   return "#c0392b"
+    elif val >= 80: return "#e67e22"
+    elif val >= 70: return "#f1c40f"
+    else:           return "#2471a3"
+
+def build_gauge(current_val, target_val):
+    return go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=current_val,
+            number={
+                'suffix': " kWh",
+                'font': {'size': 36, 'color': bar_color(current_val)}
+            },
+            title={'text': "Energy Usage (kWh)", 'font': {'size': 16, 'color': "#555"}},
+            gauge={
+                'axis': {
+                    'range': [0, 120],
+                    'tickwidth': 1,
+                    'tickcolor': "#aaa",
+                    'tickvals': [0, 20, 40, 60, 70, 80, 90, 100, 120],
+                    'tickfont': {'size': 11}
+                },
+                'bar': {'color': bar_color(current_val), 'thickness': 0.28},
+                'bgcolor': "white",
+                'borderwidth': 1,
+                'bordercolor': "#ddd",
+                'steps': [
+                    {'range': [0,  70],  'color': "#d5f5e3"},
+                    {'range': [70, 80],  'color': "#fef9e7"},
+                    {'range': [80, 90],  'color': "#fdebd0"},
+                    {'range': [90, 120], 'color': "#fadbd8"},
+                ],
+                'threshold': {
+                    'line': {'color': bar_color(target_val), 'width': 3},
+                    'thickness': 0.75,
+                    'value': target_val
+                }
+            }
+        ),
+        layout=go.Layout(
+            height=360,
+            margin=dict(t=60, b=20, l=40, r=40),
+            paper_bgcolor="white",
+        )
+    )
+
 # ── Predict Button ─────────────────────────────────────────
 predict = st.button("⚡ Predict Energy")
 
 if predict:
     with st.spinner("Calculating energy..."):
-        time.sleep(1)
+        time.sleep(0.4)
         prediction = model.predict(input_data)[0]
 
-    # ── Metric + Prediction Message ─────────────────────────
+    # ── Prediction badge ───────────────────────────────────
     st.markdown("## ⚡ Predicted Energy")
-    st.metric("Energy Consumption (kWh)", f"{prediction:.2f}")
+    # st.metric("Energy Consumption (kWh)", f"{prediction:.2f}")
 
-    if prediction > 90:
-        st.error(f"🔴 Very High energy demand: {prediction:.2f} kWh — Consider reducing HVAC or occupancy.")
-    elif prediction > 80:
-        st.warning(f"🟡 High energy demand: {prediction:.2f} kWh — Monitor usage closely.")
-    elif prediction > 70:
-        st.success(f"🟢 Normal energy demand: {prediction:.2f} kWh — Within expected range.")
-    else:
-        st.info(f"🔵 Low energy demand: {prediction:.2f} kWh — Efficient usage.")
+    # if prediction > 90:
+    #     st.error(f"🔴 Very High energy demand: {prediction:.2f} kWh — Consider reducing HVAC or occupancy.")
+    # elif prediction > 80:
+    #     st.warning(f"🟡 High energy demand: {prediction:.2f} kWh — Monitor usage closely.")
+    # elif prediction > 70:
+    #     st.success(f"🟢 Normal energy demand: {prediction:.2f} kWh — Within expected range.")
+    # else:
+    #     st.info(f"🔵 Low energy demand: {prediction:.2f} kWh — Efficient usage.")
 
-    # ── Gauge Chart ────────────────────────────────────────
-    st.markdown("## 🏁 Energy Gauge")
-    fig_gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=prediction,
-        title={'text': "Energy Usage (kWh)"},
-        gauge={
-            'axis': {'range': [0, 120]},
-            'bar': {'color': "darkblue"},
-            'steps': [
-                {'range': [0,  70],  'color': "green"},
-                {'range': [70, 80],  'color': "green"},
-                {'range': [80, 90],  'color': "yellow"},
-                {'range': [90, 120], 'color': "red"}
-            ],
-        }
-    ))
-    st.plotly_chart(fig_gauge, use_container_width=True, config={"displayModeBar": False})
+    # # ── Smooth Animated Gauge ──────────────────────────────
+    # st.markdown("## 🏁 Energy Gauge")
 
-    # ── Temperature vs Energy Line Chart (Fixed) ──────────
+    gauge_slot = st.empty()
+
+    # Cubic ease-in-out
+    n_frames = 28
+    t_vals   = np.linspace(0, 1, n_frames)
+    eased    = np.where(
+        t_vals < 0.5,
+        4 * t_vals ** 3,
+        1 - (-2 * t_vals + 2) ** 3 / 2
+    )
+    frame_values = eased * prediction
+
+    for i, v in enumerate(frame_values):
+        with gauge_slot:
+            st.plotly_chart(
+                build_gauge(round(v, 1), prediction),
+                use_container_width=True,
+                config={"displayModeBar": False},
+                key=f"gauge_frame_{i}"   # ← unique key per frame
+            )
+        time.sleep(0.035)
+
+    # Final frame locked on exact prediction value
+    with gauge_slot:
+        st.plotly_chart(
+            build_gauge(round(prediction, 2), prediction),
+            use_container_width=True,
+            config={"displayModeBar": False},
+            key="gauge_final"            # ← unique key for final frame
+        )
+
+    # ── Temperature vs Energy Line Chart ──────────────────
     st.markdown("## 📈 Temperature vs Predicted Energy (What-if Simulation)")
 
     temps = list(range(-10, 51))
@@ -138,26 +202,21 @@ if predict:
 
     for t in temps:
         temp_row = input_data.copy()
-        # ✅ Update ALL temperature-derived features so the model
-        #    sees a consistent feature set at every temperature point
         temp_row['Temperature']    = t
-        temp_row['Temp_Occupancy'] = t * occupancy   # was frozen at user's temp
-        temp_row['Temp_squared']   = t ** 2          # was frozen at user's temp
+        temp_row['Temp_Occupancy'] = t * occupancy
+        temp_row['Temp_squared']   = t ** 2
         energy_preds.append(model.predict(temp_row)[0])
 
-    # Auto-scale y-axis to actual prediction range
     y_min = max(0, min(energy_preds) - 5)
     y_max = max(energy_preds) + 10
 
     fig_line = go.Figure()
 
-    # Background zone bands
-    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=0,     y1=70,    fillcolor="lightblue", opacity=0.2, line_width=0)
-    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=70,    y1=80,    fillcolor="green",     opacity=0.2, line_width=0)
-    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=80,    y1=90,    fillcolor="yellow",    opacity=0.2, line_width=0)
-    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=90,    y1=y_max, fillcolor="red",       opacity=0.2, line_width=0)
+    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=0,  y1=70,    fillcolor="lightblue", opacity=0.2, line_width=0)
+    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=70, y1=80,    fillcolor="green",     opacity=0.2, line_width=0)
+    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=80, y1=90,    fillcolor="yellow",    opacity=0.2, line_width=0)
+    fig_line.add_shape(type="rect", x0=-10, x1=51, y0=90, y1=y_max, fillcolor="red",       opacity=0.2, line_width=0)
 
-    # Predicted energy curve
     fig_line.add_trace(go.Scatter(
         x=temps,
         y=energy_preds,
@@ -168,13 +227,12 @@ if predict:
         hovertemplate='Temp: %{x}°C<br>Energy: %{y:.2f} kWh'
     ))
 
-    # Current temperature marker
     fig_line.add_trace(go.Scatter(
         x=[temp],
         y=[prediction],
         mode='markers+text',
         name='Current Temp',
-        marker=dict(color='black', size=14, symbol='circle'),
+        marker=dict(color='black', size=14),
         text=[f"{prediction:.1f} kWh"],
         textposition="top center",
         hoverinfo="skip"
@@ -186,16 +244,16 @@ if predict:
         yaxis=dict(range=[y_min, y_max]),
         height=450,
         hovermode="x unified",
-        margin=dict(r=150),           # ← room for the legend on the right
+        margin=dict(r=150),
         legend=dict(
             yanchor="middle",
             y=0.5,
             xanchor="left",
-            x=1.02,                   # ← pushes legend outside the plot area
+            x=1.02,
             bgcolor="rgba(255,255,255,0.8)",
             bordercolor="lightgrey",
             borderwidth=1
         )
     )
 
-    st.plotly_chart(fig_line, use_container_width=True)
+    st.plotly_chart(fig_line, use_container_width=True, key="line_chart")
